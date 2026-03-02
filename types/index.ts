@@ -1,4 +1,5 @@
 export type DocumentType = "invoice" | "quote";
+export type ExpenseStatus = "pending_review" | "matched" | "exported";
 
 export type QuoteStatus = "draft" | "sent" | "accepted" | "refused";
 export type InvoiceStatus = "draft" | "sent" | "pending" | "paid" | "overdue";
@@ -84,6 +85,9 @@ export interface DocumentItem {
   converted_from_id: string | null;
   created_at: string;
   updated_at: string;
+  stripe_payment_link_id?: string | null;
+  stripe_payment_link_url?: string | null;
+  payment_status?: "unpaid" | "paid" | "expired";
 }
 
 export interface DocumentWithLines extends DocumentItem {
@@ -105,6 +109,9 @@ export interface InvoiceFormState {
   discount_type: "percent" | "fixed" | "none";
   discount_value: number;
   lines: DocumentLine[];
+  stripe_payment_link_id?: string | null;
+  stripe_payment_link_url?: string | null;
+  payment_status?: "unpaid" | "paid" | "expired";
 }
 
 export interface InvoiceTotals {
@@ -123,4 +130,54 @@ export interface InvoiceAssistantPatch {
   due_date?: string;
   notes?: string;
   payment_terms?: string;
+}
+
+export type ExpenseCategory =
+  | "restaurant"
+  | "transport"
+  | "hebergement"
+  | "materiel"
+  | "logiciel"
+  | "autre";
+
+export interface Expense {
+  id: string;
+  user_id: string;
+  montant_ttc: number;
+  montant_ht: number | null;
+  tva: number | null;
+  devise: string;
+  date: string;
+  marchand: string;
+  categorie: ExpenseCategory;
+  description: string | null;
+  numero_facture: string | null;
+  receipt_url: string | null;
+  qonto_transaction_id: string | null;
+  status: ExpenseStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExpenseInput {
+  montant_ttc: number;
+  montant_ht: number | null;
+  tva: number | null;
+  devise: string;
+  date: string;
+  marchand: string;
+  categorie: ExpenseCategory;
+  description: string | null;
+  numero_facture: string | null;
+}
+
+export interface QontoTransaction {
+  id: string;
+  amount: number;
+  currency: string;
+  side: "debit" | "credit" | string;
+  emitted_at: string;
+  label: string | null;
+  status: string | null;
+  updated_at?: string;
 }

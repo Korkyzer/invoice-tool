@@ -7,6 +7,7 @@ import {
   FileText,
   FileCheck2,
   Users,
+  Receipt,
   Settings,
   Moon,
   Sun,
@@ -21,6 +22,7 @@ const links = [
   { href: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard },
   { href: "/invoices", label: "Factures", icon: FileText },
   { href: "/quotes", label: "Devis", icon: FileCheck2 },
+  { href: "/expenses", label: "Notes de frais", icon: Receipt },
   { href: "/clients", label: "Clients", icon: Users },
   { href: "/settings", label: "Paramètres", icon: Settings },
 ];

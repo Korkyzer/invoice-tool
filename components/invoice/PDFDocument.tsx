@@ -173,7 +173,10 @@ export function InvoicePDFDocument({ profile, document, totals }: PDFDocumentPro
 
         <View style={styles.footer}>
           <Text>{document.payment_terms || profile?.default_payment_terms || "Paiement à réception"}</Text>
-          <Text>IBAN: {profile?.iban || "-"}</Text>
+          {profile?.iban ? <Text>IBAN (virement SEPA): {profile.iban}</Text> : null}
+          {document.stripe_payment_link_url ? (
+            <Text>Paiement en ligne: {document.stripe_payment_link_url}</Text>
+          ) : null}
           {document.notes ? <Text>Notes: {document.notes}</Text> : null}
           {legalMentionNoVat ? <Text>Mention légale: {legalMentionNoVat}</Text> : null}
           <Text>Conformément à la législation française, tout retard de paiement peut entraîner des pénalités.</Text>

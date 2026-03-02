@@ -100,6 +100,10 @@ export function InvoicePreview({ document, totals, profile }: InvoicePreviewProp
       <div className="mt-8 rounded-lg bg-slate-50 p-4 text-sm text-slate-700 dark:bg-slate-900 dark:text-slate-200">
         <p className="font-medium">Conditions de paiement</p>
         <p>{document.payment_terms || "Paiement à réception de facture"}</p>
+        {profile?.iban ? <p className="mt-2">IBAN (virement SEPA): {profile.iban}</p> : null}
+        {document.stripe_payment_link_url ? (
+          <p className="mt-2 break-all">Paiement en ligne: {document.stripe_payment_link_url}</p>
+        ) : null}
         {document.notes ? (
           <>
             <p className="mt-4 font-medium">Notes</p>

@@ -130,6 +130,9 @@ export function buildInitialFormState(
     payment_terms: defaults?.payment_terms ?? "Paiement à réception de facture",
     discount_type: defaults?.discount_type ?? "none",
     discount_value: defaults?.discount_value ?? 0,
+    stripe_payment_link_id: defaults?.stripe_payment_link_id ?? null,
+    stripe_payment_link_url: defaults?.stripe_payment_link_url ?? null,
+    payment_status: defaults?.payment_status ?? "unpaid",
     lines:
       defaults?.lines?.length
         ? defaults.lines
@@ -177,6 +180,9 @@ export function mapDocumentToFormState(
     payment_terms: document.payment_terms ?? "",
     discount_type: document.discount_type ?? "none",
     discount_value: Number(document.discount_value ?? 0),
+    stripe_payment_link_id: document.stripe_payment_link_id ?? null,
+    stripe_payment_link_url: document.stripe_payment_link_url ?? null,
+    payment_status: document.payment_status ?? "unpaid",
     lines: lines
       .sort((a, b) => a.position - b.position)
       .map((line, index) => ({

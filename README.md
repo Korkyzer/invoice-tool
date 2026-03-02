@@ -21,6 +21,9 @@ Application complète de gestion de factures et devis pour freelance / petite ag
 - Prévisualisation document + génération PDF immédiate
 - Assistant IA pour patch JSON de formulaire
 - Import d'une ancienne facture PDF dans l'assistant IA (pré-remplissage auto)
+- OCR notes de frais (image/PDF → formulaire pré-rempli)
+- Sync Qonto (transactions, rapprochement, export justificatif)
+- Lien de paiement Stripe par facture + webhook de confirmation
 - Paramètres vendeur (SIRET, TVA, IBAN, logo, préfixes)
 
 ## Installation locale
@@ -44,6 +47,12 @@ cp .env.example .env.local
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `MAMMOUTH_API_KEY`
 - `SERPER_API_KEY` (optionnel, pour recherche web d'infos entreprise via l'IA)
+- `STRIPE_SECRET_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+- `QONTO_LOGIN`
+- `QONTO_SECRET_KEY`
+- `APP_URL` (URL publique de l'app, ex: `https://votre-app.vercel.app`)
+- `NEXT_PUBLIC_APP_URL` (même valeur que `APP_URL`)
 - `MAMMOUTH_PDF_MODEL` (optionnel, défaut: `mistral-small-3.2-24b-instruct`)
 - `MAMMOUTH_OCR_MODEL` (optionnel, défaut: `gpt-4o`)
 - `MAMMOUTH_OCR_MAX_PAGES` (optionnel, défaut: `2`, max `4`)
@@ -54,6 +63,8 @@ cp .env.example .env.local
 - Ouvrir Supabase SQL Editor
 - Exécuter le contenu de [`supabase/migrations/001_init.sql`](supabase/migrations/001_init.sql)
 - Si la base est déjà initialisée, exécuter aussi [`supabase/migrations/002_micro_entrepreneur_legal_mention.sql`](supabase/migrations/002_micro_entrepreneur_legal_mention.sql)
+- Exécuter ensuite [`supabase/migrations/003_expenses_qonto.sql`](supabase/migrations/003_expenses_qonto.sql)
+- Exécuter ensuite [`supabase/migrations/004_stripe_payment_links.sql`](supabase/migrations/004_stripe_payment_links.sql)
 - Créer un bucket public `logos` (Storage) pour l'upload logo
 - Auth > URL Configuration:
   - Ajouter `http://localhost:3001/auth/callback` dans les Redirect URLs
@@ -80,6 +91,12 @@ Aucun Docker ni process long-running requis.
 - `POST /api/ai/fill-invoice` → assistant IA Mammouth
   - supporte la recherche web d'entreprise (SIREN/SIRET) si `SERPER_API_KEY` est configurée
 - `POST /api/ai/extract-from-pdf` → extraction d'une facture PDF puis patch JSON
+- `POST /api/expenses/ocr` → OCR reçu (image/PDF) + JSON structuré
+- `GET /api/qonto/transactions` → transactions Qonto 30 jours (debit)
+- `POST /api/qonto/match` → associer une dépense à une transaction Qonto
+- `POST /api/qonto/attach` → exporter le justificatif d'une dépense vers Qonto
+- `POST /api/invoices/[id]/payment-link` → créer un lien de paiement Stripe
+- `POST /api/webhooks/stripe` → webhook Stripe signé (paiement facture)
 - `POST /api/documents/mark-overdue` → passage auto en `overdue`
 - `GET /auth/callback` → finalise la session Supabase après Magic Link
 

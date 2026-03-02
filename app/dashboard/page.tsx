@@ -55,6 +55,12 @@ export default async function DashboardPage() {
           </div>
           <div className="flex gap-2">
             <Link
+              href="/expenses/new"
+              className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
+            >
+              Nouvelle dépense
+            </Link>
+            <Link
               href="/quotes/new"
               className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
             >

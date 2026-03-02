@@ -5,6 +5,7 @@ const mobileLinks = [
   { href: "/dashboard", label: "Tableau de bord" },
   { href: "/invoices", label: "Factures" },
   { href: "/quotes", label: "Devis" },
+  { href: "/expenses", label: "Notes de frais" },
   { href: "/clients", label: "Clients" },
   { href: "/settings", label: "Paramètres" },
 ];

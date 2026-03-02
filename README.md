@@ -1,36 +1,85 @@
-This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# Invoice Tool (Next.js + Supabase)
 
-## Getting Started
+Application complète de gestion de factures et devis pour freelance / petite agence, optimisée pour Vercel.
 
-First, run the development server:
+## Stack
+
+- Next.js 14 (App Router) + TypeScript + Tailwind CSS
+- Supabase (PostgreSQL + Auth + Storage)
+- PDF client-side: `@react-pdf/renderer`
+- Assistant IA: Mammouth API (OpenAI-compatible) via package `openai`
+- Toasts: `sonner`
+- Thème sombre: `next-themes`
+
+## Fonctionnalités principales
+
+- Factures et devis (`FAC-YYYY-XXXX`, `DEV-YYYY-XXXX`)
+- Numérotation atomique par type + année
+- Conversion devis → facture
+- Suivi de statut + paiement + détection retard
+- Clients + autofill dans les documents
+- Prévisualisation document + génération PDF immédiate
+- Assistant IA pour patch JSON de formulaire
+- Paramètres vendeur (SIRET, TVA, IBAN, logo, préfixes)
+
+## Installation locale
+
+1. Installer les dépendances:
+
+```bash
+npm install
+```
+
+2. Créer le fichier d'environnement:
+
+```bash
+cp .env.example .env.local
+```
+
+3. Renseigner les variables dans `.env.local`:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `MAMMOUTH_API_KEY`
+
+4. Créer le schéma Supabase:
+
+- Ouvrir Supabase SQL Editor
+- Exécuter le contenu de [`supabase/migrations/001_init.sql`](supabase/migrations/001_init.sql)
+- Si la base est déjà initialisée, exécuter aussi [`supabase/migrations/002_micro_entrepreneur_legal_mention.sql`](supabase/migrations/002_micro_entrepreneur_legal_mention.sql)
+- Créer un bucket public `logos` (Storage) pour l'upload logo
+- Auth > URL Configuration:
+  - Ajouter `http://localhost:3001/auth/callback` dans les Redirect URLs
+  - Ajouter aussi votre URL Vercel en production, ex: `https://votre-app.vercel.app/auth/callback`
+
+5. Lancer en local:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Déploiement Vercel
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Push sur votre dépôt Git
+2. Importer le projet dans Vercel
+3. Configurer les variables d'environnement identiques à `.env.local`
+4. Déployer
 
-This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
+Aucun Docker ni process long-running requis.
 
-## Learn More
+## Endpoints API
 
-To learn more about Next.js, take a look at the following resources:
+- `POST /api/documents/number` → génération atomique du numéro
+- `POST /api/ai/fill-invoice` → assistant IA Mammouth
+- `POST /api/documents/mark-overdue` → passage auto en `overdue`
+- `GET /auth/callback` → finalise la session Supabase après Magic Link
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Notes IA Mammouth
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js/) - your feedback and contributions are welcome!
+Le client OpenAI est configuré avec:
 
-## Deploy on Vercel
+- `baseURL: "https://api.mammouth.ai/v1"`
+- modèle `mistral-small-3.2-24b-instruct`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/deployment) for more details.
+L'API attend l'état courant du document + message utilisateur et renvoie un JSON patch.

@@ -21,7 +21,67 @@ Champs de la facture que tu peux modifier:
 - due_date: string ISO
 - notes: string (texte libre en bas de facture)
 - payment_terms: string (ex: "Paiement à 30 jours")
+
+Règles importantes:
+- Si on te fournit un contexte web, utilise uniquement ces données pour les infos d'entreprise.
+- Ne jamais inventer un SIREN/SIRET.
+- Si on te demande un SIREN, tu peux renseigner client.siret avec la valeur trouvée.
 `;
+
+type SerperResult = {
+  title?: string;
+  snippet?: string;
+  link?: string;
+};
+
+async function fetchSerperContext(query: string): Promise<string> {
+  if (!process.env.SERPER_API_KEY) return "";
+
+  try {
+    const response = await fetch("https://google.serper.dev/search", {
+      method: "POST",
+      headers: {
+        "X-API-KEY": process.env.SERPER_API_KEY,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        q: query,
+        gl: "fr",
+        hl: "fr",
+        num: 5,
+      }),
+    });
+
+    if (!response.ok) return "";
+
+    const json = (await response.json()) as {
+      organic?: SerperResult[];
+      knowledgeGraph?: {
+        title?: string;
+        description?: string;
+        website?: string;
+      };
+    };
+
+    const rows: string[] = [];
+
+    if (json.knowledgeGraph) {
+      rows.push(
+        `KnowledgeGraph: ${json.knowledgeGraph.title ?? ""} - ${json.knowledgeGraph.description ?? ""} (${json.knowledgeGraph.website ?? ""})`,
+      );
+    }
+
+    for (const item of json.organic ?? []) {
+      rows.push(
+        `Source: ${item.title ?? ""} | ${item.snippet ?? ""} | ${item.link ?? ""}`.trim(),
+      );
+    }
+
+    return rows.join("\n").slice(0, 5000);
+  } catch {
+    return "";
+  }
+}
 
 function safeJsonParse(input: string) {
   try {
@@ -57,10 +117,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ patch: {} }, { status: 400 });
     }
 
+    const shouldSearchWeb =
+      /\b(trouve|recherche|chercher|find|look up|siren|siret|société|societe|pappers|societe\.com)\b/i.test(
+        parsed.data.userInput,
+      );
+
+    const webContext = shouldSearchWeb ? await fetchSerperContext(parsed.data.userInput) : "";
+
     const userMessageWithContext = `
 État actuel de la facture: ${JSON.stringify(parsed.data.currentInvoiceState, null, 2)}
 
 Message utilisateur: ${parsed.data.userInput}
+
+Contexte web (optionnel): ${
+      webContext || "Aucun contexte web disponible ou SERPER_API_KEY non configurée."
+    }
 `;
 
     const response = await client.chat.completions.create({

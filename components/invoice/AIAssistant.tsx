@@ -17,6 +17,13 @@ interface AIAssistantProps {
   onPatch: (patch: InvoiceAssistantPatch) => void;
 }
 
+const QUICK_SUGGESTIONS = [
+  "3 jours de conseil à 600€/jour TVA 20%",
+  "Trouve-moi le SIREN de ChainZoku et mets à jour le client",
+  "Ajoute une ligne Maintenance: 2h à 120€ HT TVA 20%",
+  "Échéance à 30 jours et note: paiement par virement SEPA uniquement",
+];
+
 export function AIAssistant({ state, onPatch }: AIAssistantProps) {
   const [input, setInput] = useState("");
   const [queuedPrompt, setQueuedPrompt] = useState("");
@@ -65,9 +72,13 @@ export function AIAssistant({ state, onPatch }: AIAssistantProps) {
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!input.trim() || loading || queuedPrompt) return;
+    sendPrompt(input);
+  };
 
-    const prompt = input.trim();
+  const sendPrompt = (raw: string) => {
+    if (!raw.trim() || loading || queuedPrompt) return;
+
+    const prompt = raw.trim();
     setMessages((prev) => [...prev, { role: "user", text: prompt }]);
     setQueuedPrompt(prompt);
     setInput("");
@@ -211,6 +222,25 @@ export function AIAssistant({ state, onPatch }: AIAssistantProps) {
           Le PDF est analysé puis les champs détectés sont pré-remplis.
         </p>
       </form>
+
+      <div className="mt-3">
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          Suggestions
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {QUICK_SUGGESTIONS.map((suggestion) => (
+            <button
+              key={suggestion}
+              type="button"
+              className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              disabled={loading || Boolean(queuedPrompt)}
+              onClick={() => sendPrompt(suggestion)}
+            >
+              {suggestion}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

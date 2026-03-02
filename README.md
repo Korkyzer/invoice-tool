@@ -43,6 +43,7 @@ cp .env.example .env.local
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `MAMMOUTH_API_KEY`
+- `SERPER_API_KEY` (optionnel, pour recherche web d'infos entreprise via l'IA)
 - `MAMMOUTH_PDF_MODEL` (optionnel, défaut: `mistral-small-3.2-24b-instruct`)
 - `MAMMOUTH_OCR_MODEL` (optionnel, défaut: `gpt-4o`)
 - `MAMMOUTH_OCR_MAX_PAGES` (optionnel, défaut: `2`, max `4`)
@@ -77,6 +78,7 @@ Aucun Docker ni process long-running requis.
 
 - `POST /api/documents/number` → génération atomique du numéro
 - `POST /api/ai/fill-invoice` → assistant IA Mammouth
+  - supporte la recherche web d'entreprise (SIREN/SIRET) si `SERPER_API_KEY` est configurée
 - `POST /api/ai/extract-from-pdf` → extraction d'une facture PDF puis patch JSON
 - `POST /api/documents/mark-overdue` → passage auto en `overdue`
 - `GET /auth/callback` → finalise la session Supabase après Magic Link

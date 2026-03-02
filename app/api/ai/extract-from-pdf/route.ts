@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+
+export const runtime = "nodejs";
 
 const PATCH_SYSTEM = `
 Tu es un assistant qui extrait des informations de factures/devis français.
@@ -18,12 +22,6 @@ Champs de la facture que tu peux modifier:
 - due_date: string ISO
 - notes: string
 - payment_terms: string
-`;
-
-const OCR_SYSTEM = `
-Tu fais de l'OCR sur des pages de facture/devis en français.
-Tu dois retourner uniquement du texte brut fidèle au document (sans markdown, sans JSON).
-Garde les montants, dates, coordonnées, lignes et taux TVA si visibles.
 `;
 
 type JsonObject = Record<string, unknown>;
@@ -230,37 +228,44 @@ function extractPatchHeuristics(text: string): JsonObject {
   return out;
 }
 
-async function performVisionOcr({
-  client,
-  imageDataUrls,
-  model,
-}: {
-  client: OpenAI;
-  imageDataUrls: string[];
-  model: string;
-}) {
-  if (!imageDataUrls.length) return "";
+async function extractNativePdfText(bytes: Buffer) {
+  const pdfjsPath = join(process.cwd(), "node_modules", "pdfjs-dist", "legacy", "build", "pdf.mjs");
+  const pdfjsUrl = pathToFileURL(pdfjsPath).href;
+  const dynamicImport = new Function("url", "return import(url);") as (
+    url: string,
+  ) => Promise<typeof import("pdfjs-dist/legacy/build/pdf.mjs")>;
+  const pdfjs = await dynamicImport(pdfjsUrl);
 
-  const response = await client.chat.completions.create({
-    model,
-    messages: [
-      { role: "system", content: OCR_SYSTEM },
-      {
-        role: "user",
-        content: [
-          { type: "text", text: "Extrais le texte complet et lisible de ces pages." },
-          ...imageDataUrls.map((url) => ({
-            type: "image_url" as const,
-            image_url: { url },
-          })),
-        ],
-      },
-    ],
-    max_tokens: 4000,
-    temperature: 0,
+  const loadingTask = pdfjs.getDocument({
+    data: new Uint8Array(bytes),
+    useWorkerFetch: false,
+    isEvalSupported: false,
+    disableFontFace: true,
+    verbosity: pdfjs.VerbosityLevel.ERRORS,
   });
 
-  return (response.choices[0]?.message?.content ?? "").trim();
+  const doc = await loadingTask.promise;
+  const chunks: string[] = [];
+
+  try {
+    for (let pageIndex = 1; pageIndex <= doc.numPages; pageIndex += 1) {
+      const page = await doc.getPage(pageIndex);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items
+        .map((item) => ("str" in item ? String(item.str ?? "") : ""))
+        .join(" ")
+        .trim();
+
+      if (pageText) {
+        chunks.push(pageText);
+      }
+      page.cleanup();
+    }
+  } finally {
+    await doc.destroy();
+  }
+
+  return chunks.join("\n");
 }
 
 async function extractPatchWithModel({
@@ -303,9 +308,12 @@ async function extractPatchWithModel({
 }
 
 export async function POST(request: Request) {
+  let stage = "start";
   try {
+    stage = "env";
     const hasApiKey = Boolean(process.env.MAMMOUTH_API_KEY);
 
+    stage = "formdata";
     const formData = await request.formData();
     const file = formData.get("file");
     const rawCurrentState = formData.get("currentInvoiceState");
@@ -325,31 +333,14 @@ export async function POST(request: Request) {
     const currentInvoiceState =
       typeof rawCurrentState === "string" ? safeJsonParse(rawCurrentState) : {};
 
+    stage = "pdf-read";
     const bytes = Buffer.from(await file.arrayBuffer());
-    const { PDFParse } = await import("pdf-parse");
-    const parser = new PDFParse({ data: bytes });
-
-    const textResult = await parser.getText();
-    const nativeText = (textResult.text ?? "")
+    stage = "pdf-text";
+    const nativeText = (await extractNativePdfText(bytes))
       .replace(/\r/g, "")
       .replace(/\n{3,}/g, "\n\n")
       .trim()
       .slice(0, 30000);
-
-    const maxPages = Math.max(1, Math.min(Number(process.env.MAMMOUTH_OCR_MAX_PAGES ?? 2), 4));
-    const screenshots = await parser.getScreenshot({
-      first: maxPages,
-      imageDataUrl: true,
-      imageBuffer: false,
-      desiredWidth: 1400,
-    });
-
-    const imageDataUrls = (screenshots.pages ?? [])
-      .map((page) => page.dataUrl)
-      .filter((value): value is string => Boolean(value))
-      .slice(0, maxPages);
-
-    await parser.destroy();
 
     const client = hasApiKey
       ? new OpenAI({
@@ -358,22 +349,8 @@ export async function POST(request: Request) {
         })
       : null;
 
-    let ocrText = "";
-    const minNativeCharsForSkipOcr = Math.max(
-      100,
-      Number(process.env.MAMMOUTH_OCR_TEXT_THRESHOLD ?? 500),
-    );
-    const shouldRunOcr =
-      hasApiKey && nativeText.length < minNativeCharsForSkipOcr && imageDataUrls.length > 0;
-
-    if (shouldRunOcr) {
-      try {
-        const ocrModel = process.env.MAMMOUTH_OCR_MODEL || "gpt-4o";
-        ocrText = await performVisionOcr({ client: client!, imageDataUrls, model: ocrModel });
-      } catch {
-        ocrText = "";
-      }
-    }
+    const ocrText = "";
+    const shouldRunOcr = false;
 
     const combinedText = [nativeText, ocrText]
       .filter((chunk) => chunk && chunk.trim().length > 0)
@@ -395,6 +372,7 @@ ${combinedText.slice(0, 45000)}
 
     const modelPatch = client
       ? await extractPatchWithModel({
+          // patch inference
           client,
           model: patchModel,
           userMessageWithContext,
@@ -413,6 +391,7 @@ ${combinedText.slice(0, 45000)}
       patch,
       source,
       error: hasApiKey ? undefined : "missing_api_key_heuristic_only",
+      stage: "done",
       extractedChars: combinedText.length,
       nativeChars: nativeText.length,
       ocrChars: ocrText.length,
@@ -421,7 +400,11 @@ ${combinedText.slice(0, 45000)}
     });
   } catch (error) {
     return NextResponse.json(
-      { patch: {}, error: (error as Error).message ?? "pdf_extract_failed" },
+      {
+        patch: {},
+        error: (error as Error).message ?? "pdf_extract_failed",
+        stage,
+      },
       { status: 200 },
     );
   }

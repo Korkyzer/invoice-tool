@@ -57,9 +57,27 @@ async function getNextNumber(type: DocumentType, date: string, accessToken?: str
     body: JSON.stringify({ type, year }),
   });
 
-  if (!response.ok) throw new Error("number_error");
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as
+      | { error?: string; details?: string }
+      | null;
+    throw new Error(payload?.details || payload?.error || "number_error");
+  }
   const data = (await response.json()) as { number: string };
   return data.number;
+}
+
+function buildDraftNumber(type: DocumentType) {
+  const prefix = type === "invoice" ? "BROUILLON-FAC" : "BROUILLON-DEV";
+  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+  const random = Math.floor(Math.random() * 10000)
+    .toString()
+    .padStart(4, "0");
+  return `${prefix}-${stamp}-${random}`;
+}
+
+function isTemporaryDraftNumber(value?: string) {
+  return Boolean(value && value.startsWith("BROUILLON-"));
 }
 
 export function DocumentEditor({
@@ -150,9 +168,29 @@ export function DocumentEditor({
         return;
       }
 
-      const number =
-        state.number ||
-        (await getNextNumber(type, state.issue_date || defaultIssueDate(), session?.access_token));
+      const shouldAllocateOfficialNumber =
+        !state.number || (!options?.forceDraft && isTemporaryDraftNumber(state.number));
+
+      let number = state.number;
+      if (shouldAllocateOfficialNumber) {
+        if (options?.forceDraft && !state.number) {
+          try {
+            number = await getNextNumber(
+              type,
+              state.issue_date || defaultIssueDate(),
+              session?.access_token,
+            );
+          } catch {
+            number = buildDraftNumber(type);
+          }
+        } else {
+          number = await getNextNumber(
+            type,
+            state.issue_date || defaultIssueDate(),
+            session?.access_token,
+          );
+        }
+      }
 
       const effectiveStatus: DocumentStatus = options?.forceDraft ? "draft" : state.status;
 
@@ -231,7 +269,11 @@ export function DocumentEditor({
       }
     } catch (error) {
       console.error(error);
-      toast.error("Impossible d'enregistrer le document");
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Impossible d'enregistrer le document";
+      toast.error(`Impossible d'enregistrer le document (${message})`);
     } finally {
       setSaving(false);
     }
@@ -342,7 +384,7 @@ export function DocumentEditor({
               onClick={() => persistDocument({ forceDraft: true })}
               disabled={saving}
             >
-              Ajouter un brouillon
+              Enregistrer comme brouillon
             </Button>
           ) : null}
           {type === "quote" && documentId ? (
@@ -447,6 +489,46 @@ export function DocumentEditor({
                     }
                   />
                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Téléphone</Label>
+                  <Input
+                    value={state.client.phone ?? ""}
+                    onChange={(e) =>
+                      setState((prev) => ({
+                        ...prev,
+                        client: { ...prev.client, phone: e.target.value },
+                      }))
+                    }
+                  />
+                </div>
+                <div>
+                  <Label>TVA client</Label>
+                  <Input
+                    value={state.client.tva_number ?? ""}
+                    onChange={(e) =>
+                      setState((prev) => ({
+                        ...prev,
+                        client: { ...prev.client, tva_number: e.target.value },
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+
+              <div>
+                <Label>Site web client</Label>
+                <Input
+                  value={state.client.website ?? ""}
+                  onChange={(e) =>
+                    setState((prev) => ({
+                      ...prev,
+                      client: { ...prev.client, website: e.target.value },
+                    }))
+                  }
+                />
               </div>
 
               <div>

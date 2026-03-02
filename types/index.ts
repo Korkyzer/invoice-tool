@@ -37,6 +37,8 @@ export interface Client {
   phone: string | null;
   address: string | null;
   siret: string | null;
+  tva_number?: string | null;
+  website?: string | null;
   created_at: string;
 }
 
@@ -57,6 +59,8 @@ export interface ClientSnapshot {
   phone?: string;
   address?: string;
   siret?: string;
+  tva_number?: string;
+  website?: string;
 }
 
 export interface DocumentItem {

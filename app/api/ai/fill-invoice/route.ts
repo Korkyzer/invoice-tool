@@ -15,7 +15,7 @@ Ne réponds jamais avec des explications. Retourne uniquement le JSON patch.
 Si tu ne comprends pas, réponds avec: {}
 
 Champs de la facture que tu peux modifier:
-- client: { company_name, contact_name, email, address, siret }
+- client: { company_name, contact_name, email, phone, address, siret, tva_number, website }
 - lines: tableau de { description, quantity, unit_price, vat_rate } (vat_rate: 0, 5.5, 10 ou 20)
 - issue_date: string ISO (ex: "2025-03-15")
 - due_date: string ISO
@@ -23,9 +23,11 @@ Champs de la facture que tu peux modifier:
 - payment_terms: string (ex: "Paiement à 30 jours")
 
 Règles importantes:
-- Si on te fournit un contexte web, utilise uniquement ces données pour les infos d'entreprise.
+- Si on te fournit un contexte web, utilise ces sources pour les infos d'entreprise (SIREN/SIRET, TVA, adresse, téléphone, email, site).
 - Ne jamais inventer un SIREN/SIRET.
-- Si on te demande un SIREN, tu peux renseigner client.siret avec la valeur trouvée.
+- Ne jamais inventer un numéro de TVA intracommunautaire.
+- Si l'utilisateur demande des infos d'entreprise (SIREN/SIRET, TVA, adresse, téléphone, email, site), retourne-les dans client.
+- Si l'information demandée n'est pas trouvée avec fiabilité, ne pas la renseigner.
 `;
 
 type SerperResult = {
@@ -34,50 +36,109 @@ type SerperResult = {
   link?: string;
 };
 
+type SerperResponse = {
+  organic?: SerperResult[];
+  answerBox?: Record<string, unknown>;
+  knowledgeGraph?: {
+    title?: string;
+    description?: string;
+    website?: string;
+    [key: string]: unknown;
+  };
+  peopleAlsoAsk?: Array<Record<string, unknown>>;
+};
+
+function extractCompanyHint(input: string) {
+  const quoted = input.match(/["“”']([^"“”']{2,80})["“”']/)?.[1];
+  if (quoted) return quoted.trim();
+
+  const afterKeyword = input.match(
+    /(?:de|d'|pour|societe|société|company|entreprise)\s+([A-Za-z0-9&' .-]{2,80})/i,
+  )?.[1];
+  if (afterKeyword) return afterKeyword.trim();
+
+  return "";
+}
+
+async function searchSerper(query: string): Promise<SerperResponse | null> {
+  const apiKey = process.env.SERPER_API_KEY;
+  if (!apiKey) return null;
+
+  const response = await fetch("https://google.serper.dev/search", {
+    method: "POST",
+    headers: {
+      "X-API-KEY": apiKey,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      q: query,
+      gl: "fr",
+      hl: "fr",
+      num: 6,
+      autocorrect: true,
+    }),
+  });
+
+  if (!response.ok) return null;
+  return (await response.json()) as SerperResponse;
+}
+
 async function fetchSerperContext(query: string): Promise<string> {
   if (!process.env.SERPER_API_KEY) return "";
 
   try {
-    const response = await fetch("https://google.serper.dev/search", {
-      method: "POST",
-      headers: {
-        "X-API-KEY": process.env.SERPER_API_KEY,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        q: query,
-        gl: "fr",
-        hl: "fr",
-        num: 5,
-      }),
-    });
+    const companyHint = extractCompanyHint(query);
+    const querySet = new Set<string>([
+      query,
+      `${query} informations entreprise`,
+    ]);
 
-    if (!response.ok) return "";
-
-    const json = (await response.json()) as {
-      organic?: SerperResult[];
-      knowledgeGraph?: {
-        title?: string;
-        description?: string;
-        website?: string;
-      };
-    };
+    if (companyHint) {
+      querySet.add(`${companyHint} siren siret tva intracom adresse téléphone email site`);
+      querySet.add(`${companyHint} pappers`);
+      querySet.add(`${companyHint} societe.com`);
+    }
 
     const rows: string[] = [];
+    let totalSources = 0;
 
-    if (json.knowledgeGraph) {
-      rows.push(
-        `KnowledgeGraph: ${json.knowledgeGraph.title ?? ""} - ${json.knowledgeGraph.description ?? ""} (${json.knowledgeGraph.website ?? ""})`,
-      );
+    for (const q of Array.from(querySet).slice(0, 4)) {
+      const json = await searchSerper(q);
+      if (!json) continue;
+
+      rows.push(`Requête: ${q}`);
+
+      if (json.answerBox && Object.keys(json.answerBox).length > 0) {
+        rows.push(`AnswerBox: ${JSON.stringify(json.answerBox).slice(0, 1200)}`);
+      }
+
+      if (json.knowledgeGraph) {
+        rows.push(
+          `KnowledgeGraph: ${json.knowledgeGraph.title ?? ""} - ${json.knowledgeGraph.description ?? ""} (${json.knowledgeGraph.website ?? ""})`,
+        );
+      }
+
+      for (const item of json.organic ?? []) {
+        totalSources += 1;
+        rows.push(
+          `Source: ${item.title ?? ""} | ${item.snippet ?? ""} | ${item.link ?? ""}`.trim(),
+        );
+      }
+
+      for (const item of json.peopleAlsoAsk ?? []) {
+        const question = typeof item.question === "string" ? item.question : "";
+        const snippet = typeof item.snippet === "string" ? item.snippet : "";
+        const link = typeof item.link === "string" ? item.link : "";
+        if (!question && !snippet) continue;
+        totalSources += 1;
+        rows.push(`PAA: ${question} | ${snippet} | ${link}`);
+      }
     }
 
-    for (const item of json.organic ?? []) {
-      rows.push(
-        `Source: ${item.title ?? ""} | ${item.snippet ?? ""} | ${item.link ?? ""}`.trim(),
-      );
-    }
+    if (rows.length === 0) return "";
 
-    return rows.join("\n").slice(0, 5000);
+    rows.unshift(`Contexte web agrégé (${totalSources} sources max, non garanti).`);
+    return rows.join("\n").slice(0, 9000);
   } catch {
     return "";
   }
@@ -118,7 +179,8 @@ export async function POST(request: Request) {
     }
 
     const shouldSearchWeb =
-      /\b(trouve|recherche|chercher|find|look up|siren|siret|société|societe|pappers|societe\.com)\b/i.test(
+      Boolean(process.env.SERPER_API_KEY) &&
+      /\b(trouve|recherche|chercher|find|look up|lookup|infos?|information|coordonn|siren|siret|tva|intracom|adresse|téléphone|telephone|tel|email|mail|site|website|société|societe|entreprise|company|pappers|societe\.com)\b/i.test(
         parsed.data.userInput,
       );
 

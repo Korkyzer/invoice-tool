@@ -110,7 +110,10 @@ function clientBlock(client: ClientSnapshot) {
       {client.contact_name ? <Text>Contact: {client.contact_name}</Text> : null}
       {client.address ? <Text>{client.address}</Text> : null}
       {client.email ? <Text>Email: {client.email}</Text> : null}
+      {client.phone ? <Text>Tél: {client.phone}</Text> : null}
+      {client.website ? <Text>Site: {client.website}</Text> : null}
       {client.siret ? <Text>SIRET: {client.siret}</Text> : null}
+      {client.tva_number ? <Text>TVA: {client.tva_number}</Text> : null}
     </View>
   );
 }

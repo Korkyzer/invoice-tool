@@ -139,12 +139,19 @@ function extractPatchHeuristics(text: string): JsonObject {
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
+  const flattened = text.replace(/\s+/g, " ").trim();
 
   const out: JsonObject = {};
 
   const email = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0];
   const siret = text.match(/(?:SIRET|SIREN)\s*[:\-]?\s*(\d{9,14})/i)?.[1];
   const issueDateRaw = text.match(/Date[^\n:]*[:\-]\s*(\d{2}[\/\-]\d{2}[\/\-]\d{4})/i)?.[1];
+  const companyNearAddress = flattened.match(
+    /\b([A-Z][A-Z0-9&' .-]{2,})\s+\d{1,4}\s+[A-Za-zÀ-ÿ0-9' .-]+\b\d{5}\b/i,
+  )?.[1];
+  const addressFromFlat = flattened.match(
+    /\d{1,4}\s+[A-Za-zÀ-ÿ0-9' .-]+?\s+\d{5}\s+[A-Za-zÀ-ÿ' -]+(?:\s*-\s*[A-Za-zÀ-ÿ' -]+)?/i,
+  )?.[0];
 
   const companyCandidates = lines.filter((line) => {
     const lowered = line.toLowerCase();
@@ -165,9 +172,17 @@ function extractPatchHeuristics(text: string): JsonObject {
   const address = lines.find((line) => /\b\d{5}\b/.test(line) && /[A-Za-zÀ-ÿ]/.test(line));
 
   const client: JsonObject = {};
-  if (companyCandidates[0]) client.company_name = companyCandidates[0];
+  if (companyNearAddress) {
+    client.company_name = companyNearAddress.trim();
+  } else if (companyCandidates[0]) {
+    client.company_name = companyCandidates[0];
+  }
   if (email) client.email = email;
-  if (address) client.address = address;
+  if (addressFromFlat) {
+    client.address = addressFromFlat.trim();
+  } else if (address) {
+    client.address = address;
+  }
   if (siret) client.siret = siret;
   if (Object.keys(client).length) out.client = client;
 
@@ -210,6 +225,32 @@ function extractPatchHeuristics(text: string): JsonObject {
       unit_price,
       vat_rate: normalizeVat(inferredVatRate),
     });
+  }
+
+  if (!extractedLines.length) {
+    const tableBlock =
+      flattened.match(
+        /(?:Désignation|Designation)\s+(.+?)(?=Sous-total|Sous total|Total\s+€?\s*HT|Total\s+TTC)/i,
+      )?.[1] ?? "";
+
+    const compactBlock = tableBlock.replace(/\s+/g, " ").trim();
+    const tableRegex =
+      /([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9'"()\-/. ]{3,}?)\s+(\d+(?:[.,]\d+)?)\s+(\d{1,3}(?:[ \u00a0]\d{3})*(?:[.,]\d{2}))\s*€?\s+(\d{1,3}(?:[ \u00a0]\d{3})*(?:[.,]\d{2}))\s*€/gi;
+
+    const matches = Array.from(compactBlock.matchAll(tableRegex));
+    for (const match of matches) {
+      const description = match[1].replace(/\s+/g, " ").trim();
+      const quantity = parseNumberish(match[2]);
+      const unit_price = parseNumberish(match[3]);
+      if (!description || quantity <= 0 || unit_price <= 0) continue;
+
+      extractedLines.push({
+        description,
+        quantity,
+        unit_price,
+        vat_rate: normalizeVat(inferredVatRate),
+      });
+    }
   }
 
   if (extractedLines.length) out.lines = extractedLines;

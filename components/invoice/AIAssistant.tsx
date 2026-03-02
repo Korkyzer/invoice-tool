@@ -19,7 +19,7 @@ interface AIAssistantProps {
 
 const QUICK_SUGGESTIONS = [
   "3 jours de conseil à 600€/jour TVA 20%",
-  "Trouve-moi le SIREN de ChainZoku et mets à jour le client",
+  "Trouve les infos de ChainZoku (SIREN, TVA, adresse, téléphone, site) et mets à jour le client",
   "Ajoute une ligne Maintenance: 2h à 120€ HT TVA 20%",
   "Échéance à 30 jours et note: paiement par virement SEPA uniquement",
 ];
@@ -112,6 +112,7 @@ export function AIAssistant({ state, onPatch }: AIAssistantProps) {
       const result = (await response.json()) as {
         patch: InvoiceAssistantPatch;
         error?: string;
+        stage?: string;
         usedOcr?: boolean;
         source?: "model" | "heuristic";
       };
@@ -123,11 +124,19 @@ export function AIAssistant({ state, onPatch }: AIAssistantProps) {
         } else if (result.error === "file_too_large") {
           toast.error("PDF trop volumineux (max 15 Mo)");
         } else {
-          toast.error("Aucune donnée exploitable trouvée dans ce PDF");
+          const debugSuffix = result.error
+            ? ` (${result.error}${result.stage ? ` @ ${result.stage}` : ""})`
+            : "";
+          toast.error(`Aucune donnée exploitable trouvée dans ce PDF${debugSuffix}`);
         }
         setMessages((prev) => [
           ...prev,
-          { role: "assistant", text: "Je n'ai pas trouvé de données fiables dans ce PDF." },
+          {
+            role: "assistant",
+            text: result.error
+              ? `Je n'ai pas trouvé de données fiables (${result.error}${result.stage ? `, étape ${result.stage}` : ""}).`
+              : "Je n'ai pas trouvé de données fiables dans ce PDF.",
+          },
         ]);
       } else {
         onPatch(patch);

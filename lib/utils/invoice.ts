@@ -154,6 +154,8 @@ export function mapClientToSnapshot(client?: Client | null) {
     phone: client.phone ?? "",
     address: client.address ?? "",
     siret: client.siret ?? "",
+    tva_number: client.tva_number ?? "",
+    website: client.website ?? "",
   };
 }
 

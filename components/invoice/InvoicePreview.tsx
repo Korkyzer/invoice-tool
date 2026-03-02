@@ -40,7 +40,10 @@ export function InvoicePreview({ document, totals, profile }: InvoicePreviewProp
           {document.client.contact_name ? <p>{document.client.contact_name}</p> : null}
           {document.client.address ? <p className="whitespace-pre-line">{document.client.address}</p> : null}
           {document.client.email ? <p>{document.client.email}</p> : null}
+          {document.client.phone ? <p>Tél: {document.client.phone}</p> : null}
+          {document.client.website ? <p>Site: {document.client.website}</p> : null}
           {document.client.siret ? <p>SIRET: {document.client.siret}</p> : null}
+          {document.client.tva_number ? <p>TVA: {document.client.tva_number}</p> : null}
         </div>
       </div>
 

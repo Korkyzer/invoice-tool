@@ -46,6 +46,7 @@ cp .env.example .env.local
 - `MAMMOUTH_PDF_MODEL` (optionnel, défaut: `mistral-small-3.2-24b-instruct`)
 - `MAMMOUTH_OCR_MODEL` (optionnel, défaut: `gpt-4o`)
 - `MAMMOUTH_OCR_MAX_PAGES` (optionnel, défaut: `2`, max `4`)
+- `MAMMOUTH_OCR_TEXT_THRESHOLD` (optionnel, défaut: `500`)
 
 4. Créer le schéma Supabase:
 

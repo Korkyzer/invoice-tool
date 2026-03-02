@@ -18,12 +18,6 @@ Champs de la facture que tu peux modifier:
 - due_date: string ISO
 - notes: string
 - payment_terms: string
-
-Règles:
-- Extrait le plus d'informations fiables possible.
-- N'invente pas de données absentes.
-- Si une TVA n'est pas explicitement trouvée, utilise 20.
-- Si une ligne est ambiguë, ne la renvoie pas.
 `;
 
 const OCR_SYSTEM = `
@@ -31,6 +25,8 @@ Tu fais de l'OCR sur des pages de facture/devis en français.
 Tu dois retourner uniquement du texte brut fidèle au document (sans markdown, sans JSON).
 Garde les montants, dates, coordonnées, lignes et taux TVA si visibles.
 `;
+
+type JsonObject = Record<string, unknown>;
 
 function safeJsonParse(input: string) {
   try {
@@ -40,12 +36,198 @@ function safeJsonParse(input: string) {
       : trimmed;
     const parsed = JSON.parse(cleaned);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed;
+      return parsed as JsonObject;
     }
     return {};
   } catch {
     return {};
   }
+}
+
+function parseNumberish(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return 0;
+  const cleaned = value
+    .replace(/\u00a0/g, " ")
+    .replace(/[€$]/g, "")
+    .replace(/\s/g, "")
+    .replace(/,/g, ".")
+    .trim();
+  const numeric = Number(cleaned);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function normalizeDate(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const input = value.trim();
+
+  const iso = input.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return input;
+
+  const fr = input.match(/^(\d{2})[\/-](\d{2})[\/-](\d{4})$/);
+  if (fr) {
+    const [, dd, mm, yyyy] = fr;
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  return undefined;
+}
+
+function normalizeVat(value: unknown): number {
+  const rate = parseNumberish(value);
+  const allowed = [0, 5.5, 10, 20];
+  if (allowed.includes(rate)) return rate;
+  if (rate <= 0.5) return 0;
+  if (rate <= 7.75) return 5.5;
+  if (rate <= 15) return 10;
+  return 20;
+}
+
+function sanitizePatch(patch: JsonObject) {
+  const out: JsonObject = {};
+
+  if (patch.client && typeof patch.client === "object" && !Array.isArray(patch.client)) {
+    const raw = patch.client as JsonObject;
+    const client: JsonObject = {};
+    for (const key of ["company_name", "contact_name", "email", "address", "siret"] as const) {
+      const value = raw[key];
+      if (typeof value === "string" && value.trim()) {
+        client[key] = value.trim();
+      }
+    }
+    if (Object.keys(client).length) out.client = client;
+  }
+
+  if (Array.isArray(patch.lines)) {
+    const lines = patch.lines
+      .map((line) => {
+        if (!line || typeof line !== "object") return null;
+        const raw = line as JsonObject;
+        const description = String(raw.description ?? "").trim();
+        const quantity = parseNumberish(raw.quantity);
+        const unit_price = parseNumberish(raw.unit_price);
+        const vat_rate = normalizeVat(raw.vat_rate);
+
+        if (!description || quantity <= 0 || unit_price < 0) return null;
+        return { description, quantity, unit_price, vat_rate };
+      })
+      .filter((line): line is NonNullable<typeof line> => Boolean(line));
+
+    if (lines.length) out.lines = lines;
+  }
+
+  const issueDate = normalizeDate(patch.issue_date);
+  if (issueDate) out.issue_date = issueDate;
+
+  const dueDate = normalizeDate(patch.due_date);
+  if (dueDate) out.due_date = dueDate;
+
+  if (typeof patch.notes === "string" && patch.notes.trim()) {
+    out.notes = patch.notes.trim();
+  }
+
+  if (typeof patch.payment_terms === "string" && patch.payment_terms.trim()) {
+    out.payment_terms = patch.payment_terms.trim();
+  }
+
+  return out;
+}
+
+function hasMeaningfulPatch(patch: JsonObject) {
+  return Object.keys(patch).length > 0;
+}
+
+function extractPatchHeuristics(text: string): JsonObject {
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const out: JsonObject = {};
+
+  const email = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0];
+  const siret = text.match(/(?:SIRET|SIREN)\s*[:\-]?\s*(\d{9,14})/i)?.[1];
+  const issueDateRaw = text.match(/Date[^\n:]*[:\-]\s*(\d{2}[\/\-]\d{2}[\/\-]\d{4})/i)?.[1];
+
+  const companyCandidates = lines.filter((line) => {
+    const lowered = line.toLowerCase();
+    if (line.length < 2 || line.length > 60) return false;
+    if (/\d/.test(line)) return false;
+    if (/[€@]/.test(line)) return false;
+    if (
+      /facture|date|désignation|sous-total|total|iban|bic|swift|tva|siret|siren|paiement|virement/.test(
+        lowered,
+      )
+    ) {
+      return false;
+    }
+    const upper = line.replace(/[^A-ZÀ-Ÿ]/g, "").length;
+    return upper >= Math.max(3, Math.floor(line.length * 0.5));
+  });
+
+  const address = lines.find((line) => /\b\d{5}\b/.test(line) && /[A-Za-zÀ-ÿ]/.test(line));
+
+  const client: JsonObject = {};
+  if (companyCandidates[0]) client.company_name = companyCandidates[0];
+  if (email) client.email = email;
+  if (address) client.address = address;
+  if (siret) client.siret = siret;
+  if (Object.keys(client).length) out.client = client;
+
+  const inferredVatRate =
+    text.match(/TVA\s*(\d{1,2}(?:[.,]\d+)?)\s*%/i)?.[1] ??
+    (text.match(/TVA\s+non\s+applicable|art\.?\s*293\s*B/i) ? "0" : "20");
+
+  const extractedLines: Array<{
+    description: string;
+    quantity: number;
+    unit_price: number;
+    vat_rate: number;
+  }> = [];
+
+  for (const rawLine of lines) {
+    const lowered = rawLine.toLowerCase();
+    if (
+      /désignation|sous-total|total|iban|bic|swift|facture|date|paiement|tva non applicable|virement/.test(
+        lowered,
+      )
+    ) {
+      continue;
+    }
+
+    const match = rawLine.match(
+      /^(.*?)\s+(\d+(?:[.,]\d+)?)\s+([\d\s]+[.,]\d{2})\s*€?\s+([\d\s]+[.,]\d{2})\s*€?$/,
+    );
+    if (!match) continue;
+
+    const [, desc, qtyRaw, unitRaw] = match;
+    const description = desc.trim();
+    const quantity = parseNumberish(qtyRaw);
+    const unit_price = parseNumberish(unitRaw);
+
+    if (!description || quantity <= 0 || unit_price <= 0) continue;
+
+    extractedLines.push({
+      description,
+      quantity,
+      unit_price,
+      vat_rate: normalizeVat(inferredVatRate),
+    });
+  }
+
+  if (extractedLines.length) out.lines = extractedLines;
+
+  const issueDate = normalizeDate(issueDateRaw);
+  if (issueDate) out.issue_date = issueDate;
+
+  if (/TVA\s+non\s+applicable|art\.?\s*293\s*B/i.test(text)) {
+    out.notes = "TVA non applicable, art. 293 B du CGI.";
+  }
+
+  if (/au comptant/i.test(text)) {
+    out.payment_terms = "Paiement comptant par virement.";
+  }
+
+  return out;
 }
 
 async function performVisionOcr({
@@ -81,11 +263,48 @@ async function performVisionOcr({
   return (response.choices[0]?.message?.content ?? "").trim();
 }
 
+async function extractPatchWithModel({
+  client,
+  model,
+  userMessageWithContext,
+}: {
+  client: OpenAI;
+  model: string;
+  userMessageWithContext: string;
+}) {
+  try {
+    const response = await client.chat.completions.create({
+      model,
+      messages: [
+        { role: "system", content: PATCH_SYSTEM },
+        { role: "user", content: userMessageWithContext },
+      ],
+      max_tokens: 900,
+      temperature: 0.1,
+      response_format: { type: "json_object" } as never,
+    });
+
+    const content = response.choices[0]?.message?.content ?? "{}";
+    return sanitizePatch(safeJsonParse(content));
+  } catch {
+    const fallback = await client.chat.completions.create({
+      model,
+      messages: [
+        { role: "system", content: PATCH_SYSTEM },
+        { role: "user", content: userMessageWithContext },
+      ],
+      max_tokens: 900,
+      temperature: 0.1,
+    });
+
+    const content = fallback.choices[0]?.message?.content ?? "{}";
+    return sanitizePatch(safeJsonParse(content));
+  }
+}
+
 export async function POST(request: Request) {
   try {
-    if (!process.env.MAMMOUTH_API_KEY) {
-      return NextResponse.json({ patch: {}, error: "missing_api_key" }, { status: 200 });
-    }
+    const hasApiKey = Boolean(process.env.MAMMOUTH_API_KEY);
 
     const formData = await request.formData();
     const file = formData.get("file");
@@ -117,11 +336,7 @@ export async function POST(request: Request) {
       .trim()
       .slice(0, 30000);
 
-    const maxPages = Math.max(
-      1,
-      Math.min(Number(process.env.MAMMOUTH_OCR_MAX_PAGES ?? 2), 4),
-    );
-
+    const maxPages = Math.max(1, Math.min(Number(process.env.MAMMOUTH_OCR_MAX_PAGES ?? 2), 4));
     const screenshots = await parser.getScreenshot({
       first: maxPages,
       imageDataUrl: true,
@@ -136,21 +351,25 @@ export async function POST(request: Request) {
 
     await parser.destroy();
 
-    const client = new OpenAI({
-      apiKey: process.env.MAMMOUTH_API_KEY,
-      baseURL: "https://api.mammouth.ai/v1",
-    });
+    const client = hasApiKey
+      ? new OpenAI({
+          apiKey: process.env.MAMMOUTH_API_KEY,
+          baseURL: "https://api.mammouth.ai/v1",
+        })
+      : null;
 
     let ocrText = "";
-    const shouldRunOcr = nativeText.length < 160 && imageDataUrls.length > 0;
+    const minNativeCharsForSkipOcr = Math.max(
+      100,
+      Number(process.env.MAMMOUTH_OCR_TEXT_THRESHOLD ?? 500),
+    );
+    const shouldRunOcr =
+      hasApiKey && nativeText.length < minNativeCharsForSkipOcr && imageDataUrls.length > 0;
+
     if (shouldRunOcr) {
       try {
         const ocrModel = process.env.MAMMOUTH_OCR_MODEL || "gpt-4o";
-        ocrText = await performVisionOcr({
-          client,
-          imageDataUrls,
-          model: ocrModel,
-        });
+        ocrText = await performVisionOcr({ client: client!, imageDataUrls, model: ocrModel });
       } catch {
         ocrText = "";
       }
@@ -174,21 +393,26 @@ Texte extrait du PDF source:
 ${combinedText.slice(0, 45000)}
 `;
 
-    const response = await client.chat.completions.create({
-      model: patchModel,
-      messages: [
-        { role: "system", content: PATCH_SYSTEM },
-        { role: "user", content: userMessageWithContext },
-      ],
-      max_tokens: 800,
-      temperature: 0.1,
-    });
+    const modelPatch = client
+      ? await extractPatchWithModel({
+          client,
+          model: patchModel,
+          userMessageWithContext,
+        })
+      : {};
 
-    const content = response.choices[0]?.message?.content ?? "{}";
-    const patch = safeJsonParse(content);
+    let patch = modelPatch;
+    let source: "model" | "heuristic" = "model";
+
+    if (!hasMeaningfulPatch(modelPatch)) {
+      patch = sanitizePatch(extractPatchHeuristics(combinedText));
+      source = "heuristic";
+    }
 
     return NextResponse.json({
       patch,
+      source,
+      error: hasApiKey ? undefined : "missing_api_key_heuristic_only",
       extractedChars: combinedText.length,
       nativeChars: nativeText.length,
       ocrChars: ocrText.length,

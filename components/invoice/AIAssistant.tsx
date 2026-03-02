@@ -98,18 +98,35 @@ export function AIAssistant({ state, onPatch }: AIAssistantProps) {
       });
 
       if (!response.ok) throw new Error("upload_error");
-      const result = (await response.json()) as { patch: InvoiceAssistantPatch; error?: string };
+      const result = (await response.json()) as {
+        patch: InvoiceAssistantPatch;
+        error?: string;
+        usedOcr?: boolean;
+        source?: "model" | "heuristic";
+      };
       const patch = result.patch;
 
       if (!patch || Object.keys(patch).length === 0) {
-        toast.error("Aucune donnée exploitable trouvée dans ce PDF");
+        if (result.error === "missing_api_key") {
+          toast.error("MAMMOUTH_API_KEY manquante côté serveur");
+        } else if (result.error === "file_too_large") {
+          toast.error("PDF trop volumineux (max 15 Mo)");
+        } else {
+          toast.error("Aucune donnée exploitable trouvée dans ce PDF");
+        }
         setMessages((prev) => [
           ...prev,
           { role: "assistant", text: "Je n'ai pas trouvé de données fiables dans ce PDF." },
         ]);
       } else {
         onPatch(patch);
-        toast.success("Informations importées depuis le PDF");
+        if (result.usedOcr) {
+          toast.success("Import réussi via OCR");
+        } else if (result.source === "heuristic") {
+          toast.success("Import réussi (mode de secours)");
+        } else {
+          toast.success("Informations importées depuis le PDF");
+        }
         setMessages((prev) => [
           ...prev,
           { role: "assistant", text: "Informations de la facture précédente appliquées." },

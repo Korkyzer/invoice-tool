@@ -26,6 +26,202 @@ Champs de la facture que tu peux modifier:
 
 type JsonObject = Record<string, unknown>;
 
+function ensurePdfJsNodePolyfills() {
+  const g = globalThis as Record<string, unknown>;
+
+  if (typeof g.DOMMatrix === "undefined") {
+    class DOMMatrixPolyfill {
+      a = 1;
+      b = 0;
+      c = 0;
+      d = 1;
+      e = 0;
+      f = 0;
+      m11 = 1;
+      m12 = 0;
+      m13 = 0;
+      m14 = 0;
+      m21 = 0;
+      m22 = 1;
+      m23 = 0;
+      m24 = 0;
+      m31 = 0;
+      m32 = 0;
+      m33 = 1;
+      m34 = 0;
+      m41 = 0;
+      m42 = 0;
+      m43 = 0;
+      m44 = 1;
+      is2D = true;
+      isIdentity = true;
+
+      constructor(init?: number[] | Float32Array | Float64Array | string | DOMMatrixPolyfill) {
+        if (Array.isArray(init) || init instanceof Float32Array || init instanceof Float64Array) {
+          const values = Array.from(init);
+          if (values.length >= 6) {
+            this.a = values[0] ?? this.a;
+            this.b = values[1] ?? this.b;
+            this.c = values[2] ?? this.c;
+            this.d = values[3] ?? this.d;
+            this.e = values[4] ?? this.e;
+            this.f = values[5] ?? this.f;
+            this.m11 = this.a;
+            this.m12 = this.b;
+            this.m21 = this.c;
+            this.m22 = this.d;
+            this.m41 = this.e;
+            this.m42 = this.f;
+          }
+        } else if (init && typeof init === "object") {
+          const matrix = init as DOMMatrixPolyfill;
+          this.a = Number(matrix.a ?? this.a);
+          this.b = Number(matrix.b ?? this.b);
+          this.c = Number(matrix.c ?? this.c);
+          this.d = Number(matrix.d ?? this.d);
+          this.e = Number(matrix.e ?? this.e);
+          this.f = Number(matrix.f ?? this.f);
+          this.m11 = Number(matrix.m11 ?? this.a);
+          this.m12 = Number(matrix.m12 ?? this.b);
+          this.m21 = Number(matrix.m21 ?? this.c);
+          this.m22 = Number(matrix.m22 ?? this.d);
+          this.m41 = Number(matrix.m41 ?? this.e);
+          this.m42 = Number(matrix.m42 ?? this.f);
+          this.m33 = Number(matrix.m33 ?? this.m33);
+          this.m44 = Number(matrix.m44 ?? this.m44);
+        }
+      }
+
+      static fromMatrix(init?: unknown) {
+        return new DOMMatrixPolyfill(init as never);
+      }
+
+      static fromFloat32Array(init: Float32Array) {
+        return new DOMMatrixPolyfill(init);
+      }
+
+      static fromFloat64Array(init: Float64Array) {
+        return new DOMMatrixPolyfill(init);
+      }
+
+      multiply() {
+        return new DOMMatrixPolyfill(this);
+      }
+
+      multiplySelf() {
+        return this;
+      }
+
+      preMultiplySelf() {
+        return this;
+      }
+
+      inverse() {
+        return new DOMMatrixPolyfill(this);
+      }
+
+      invertSelf() {
+        return this;
+      }
+
+      translate() {
+        return new DOMMatrixPolyfill(this);
+      }
+
+      translateSelf() {
+        return this;
+      }
+
+      scale() {
+        return new DOMMatrixPolyfill(this);
+      }
+
+      scaleSelf() {
+        return this;
+      }
+
+      rotate() {
+        return new DOMMatrixPolyfill(this);
+      }
+
+      rotateSelf() {
+        return this;
+      }
+
+      transformPoint(point?: { x?: number; y?: number; z?: number; w?: number }) {
+        return {
+          x: Number(point?.x ?? 0),
+          y: Number(point?.y ?? 0),
+          z: Number(point?.z ?? 0),
+          w: Number(point?.w ?? 1),
+        };
+      }
+
+      toFloat32Array() {
+        return new Float32Array([
+          this.m11,
+          this.m12,
+          this.m13,
+          this.m14,
+          this.m21,
+          this.m22,
+          this.m23,
+          this.m24,
+          this.m31,
+          this.m32,
+          this.m33,
+          this.m34,
+          this.m41,
+          this.m42,
+          this.m43,
+          this.m44,
+        ]);
+      }
+    }
+
+    g.DOMMatrix = DOMMatrixPolyfill;
+  }
+
+  if (typeof g.ImageData === "undefined") {
+    class ImageDataPolyfill {
+      data: Uint8ClampedArray;
+      width: number;
+      height: number;
+
+      constructor(
+        dataOrWidth: Uint8ClampedArray | number,
+        width?: number,
+        height?: number,
+      ) {
+        if (typeof dataOrWidth === "number") {
+          this.width = dataOrWidth;
+          this.height = Number(width ?? 0);
+          this.data = new Uint8ClampedArray(Math.max(0, this.width * this.height * 4));
+          return;
+        }
+
+        this.data = dataOrWidth;
+        this.width = Number(width ?? 0);
+        this.height = Number(height ?? 0);
+      }
+    }
+
+    g.ImageData = ImageDataPolyfill;
+  }
+
+  if (typeof g.Path2D === "undefined") {
+    class Path2DPolyfill {
+      addPath() {}
+      closePath() {}
+      moveTo() {}
+      lineTo() {}
+      rect() {}
+    }
+
+    g.Path2D = Path2DPolyfill;
+  }
+}
+
 function safeJsonParse(input: string) {
   try {
     const trimmed = input.trim();
@@ -270,6 +466,7 @@ function extractPatchHeuristics(text: string): JsonObject {
 }
 
 async function extractNativePdfText(bytes: Buffer) {
+  ensurePdfJsNodePolyfills();
   const pdfjsPath = join(process.cwd(), "node_modules", "pdfjs-dist", "legacy", "build", "pdf.mjs");
   const pdfjsUrl = pathToFileURL(pdfjsPath).href;
   const dynamicImport = new Function("url", "return import(url);") as (

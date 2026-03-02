@@ -44,6 +44,8 @@ cp .env.example .env.local
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `MAMMOUTH_API_KEY`
 - `MAMMOUTH_PDF_MODEL` (optionnel, défaut: `mistral-small-3.2-24b-instruct`)
+- `MAMMOUTH_OCR_MODEL` (optionnel, défaut: `gpt-4o`)
+- `MAMMOUTH_OCR_MAX_PAGES` (optionnel, défaut: `2`, max `4`)
 
 4. Créer le schéma Supabase:
 
@@ -86,3 +88,9 @@ Le client OpenAI est configuré avec:
 - modèle `mistral-small-3.2-24b-instruct`
 
 L'API attend l'état courant du document + message utilisateur et renvoie un JSON patch.
+
+Pour l'import PDF V2:
+
+- extraction texte native du PDF
+- fallback OCR vision (Mammouth) si le PDF est scanné / pauvre en texte
+- fusion des deux pour remplir la nouvelle facture

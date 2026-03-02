@@ -20,6 +20,7 @@ Application complète de gestion de factures et devis pour freelance / petite ag
 - Clients + autofill dans les documents
 - Prévisualisation document + génération PDF immédiate
 - Assistant IA pour patch JSON de formulaire
+- Import d'une ancienne facture PDF dans l'assistant IA (pré-remplissage auto)
 - Paramètres vendeur (SIRET, TVA, IBAN, logo, préfixes)
 
 ## Installation locale
@@ -42,6 +43,7 @@ cp .env.example .env.local
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `MAMMOUTH_API_KEY`
+- `MAMMOUTH_PDF_MODEL` (optionnel, défaut: `mistral-small-3.2-24b-instruct`)
 
 4. Créer le schéma Supabase:
 
@@ -72,6 +74,7 @@ Aucun Docker ni process long-running requis.
 
 - `POST /api/documents/number` → génération atomique du numéro
 - `POST /api/ai/fill-invoice` → assistant IA Mammouth
+- `POST /api/ai/extract-from-pdf` → extraction d'une facture PDF puis patch JSON
 - `POST /api/documents/mark-overdue` → passage auto en `overdue`
 - `GET /auth/callback` → finalise la session Supabase après Magic Link
 

@@ -71,7 +71,7 @@ export function DocumentEditor({
 }: DocumentEditorProps) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
-  const [aiMode, setAiMode] = useState(true);
+  const [aiMode, setAiMode] = useState(false);
   const [state, setState] = useState<InvoiceFormState>(() =>
     initialState
       ? initialState
@@ -132,7 +132,7 @@ export function DocumentEditor({
     }));
   };
 
-  const persistDocument = async () => {
+  const persistDocument = async (options?: { forceDraft?: boolean }) => {
     setSaving(true);
 
     try {
@@ -154,16 +154,18 @@ export function DocumentEditor({
         state.number ||
         (await getNextNumber(type, state.issue_date || defaultIssueDate(), session?.access_token));
 
+      const effectiveStatus: DocumentStatus = options?.forceDraft ? "draft" : state.status;
+
       const docPayload = {
         user_id: user.id,
         type,
         number,
-        status: state.status,
+        status: effectiveStatus,
         client_id: state.client_id,
         client_snapshot: state.client,
         issue_date: state.issue_date || defaultIssueDate(),
         due_date: state.due_date || null,
-        payment_date: state.status === "paid" ? state.payment_date || null : null,
+        payment_date: effectiveStatus === "paid" ? state.payment_date || null : null,
         subtotal_ht: totals.subtotalHt,
         total_tva: totals.totalVat,
         total_ttc: totals.totalTtc,
@@ -215,8 +217,12 @@ export function DocumentEditor({
         if (linesError) throw linesError;
       }
 
-      setState((prev) => ({ ...prev, number }));
-      toast.success(type === "invoice" ? "Facture enregistrée" : "Devis enregistré");
+      setState((prev) => ({ ...prev, number, status: effectiveStatus }));
+      if (options?.forceDraft) {
+        toast.success("Brouillon ajouté");
+      } else {
+        toast.success(type === "invoice" ? "Facture enregistrée" : "Devis enregistré");
+      }
 
       if (!documentId && currentId) {
         router.replace(`/${type === "invoice" ? "invoices" : "quotes"}/${currentId}`);
@@ -329,6 +335,16 @@ export function DocumentEditor({
         </div>
 
         <div className="flex flex-wrap gap-2">
+          {!documentId ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => persistDocument({ forceDraft: true })}
+              disabled={saving}
+            >
+              Ajouter un brouillon
+            </Button>
+          ) : null}
           {type === "quote" && documentId ? (
             <Button type="button" variant="outline" onClick={convertToInvoice} disabled={saving}>
               Convertir en facture
@@ -338,7 +354,7 @@ export function DocumentEditor({
             <FileDown size={14} className="mr-2" />
             Télécharger PDF
           </Button>
-          <Button type="button" onClick={persistDocument} disabled={saving}>
+          <Button type="button" onClick={() => persistDocument()} disabled={saving}>
             <Save size={14} className="mr-2" />
             {saving ? "Enregistrement..." : "Enregistrer"}
           </Button>

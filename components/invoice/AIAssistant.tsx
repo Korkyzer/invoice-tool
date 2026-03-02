@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Loader2, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { FileUp, Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -21,7 +21,9 @@ export function AIAssistant({ state, onPatch }: AIAssistantProps) {
   const [input, setInput] = useState("");
   const [queuedPrompt, setQueuedPrompt] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadingLabel, setLoadingLabel] = useState("IA en train de réfléchir...");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const visibleMessages = useMemo(() => messages.slice(-4), [messages]);
 
@@ -30,6 +32,7 @@ export function AIAssistant({ state, onPatch }: AIAssistantProps) {
 
     const timeout = setTimeout(async () => {
       setLoading(true);
+      setLoadingLabel("IA en train de réfléchir...");
       try {
         const response = await fetch("/api/ai/fill-invoice", {
           method: "POST",
@@ -70,6 +73,57 @@ export function AIAssistant({ state, onPatch }: AIAssistantProps) {
     setInput("");
   };
 
+  const handlePdfUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (file.type !== "application/pdf") {
+      toast.error("Merci d'uploader un fichier PDF");
+      event.target.value = "";
+      return;
+    }
+
+    setLoading(true);
+    setLoadingLabel("Extraction du PDF en cours...");
+    setMessages((prev) => [...prev, { role: "user", text: `Import PDF: ${file.name}` }]);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("currentInvoiceState", JSON.stringify(state));
+
+      const response = await fetch("/api/ai/extract-from-pdf", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error("upload_error");
+      const result = (await response.json()) as { patch: InvoiceAssistantPatch; error?: string };
+      const patch = result.patch;
+
+      if (!patch || Object.keys(patch).length === 0) {
+        toast.error("Aucune donnée exploitable trouvée dans ce PDF");
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", text: "Je n'ai pas trouvé de données fiables dans ce PDF." },
+        ]);
+      } else {
+        onPatch(patch);
+        toast.success("Informations importées depuis le PDF");
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", text: "Informations de la facture précédente appliquées." },
+        ]);
+      }
+    } catch {
+      toast.error("Import PDF impossible");
+      setMessages((prev) => [...prev, { role: "assistant", text: "Import PDF impossible." }]);
+    } finally {
+      setLoading(false);
+      event.target.value = "";
+    }
+  };
+
   return (
     <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="mb-4 flex items-center gap-2">
@@ -98,7 +152,7 @@ export function AIAssistant({ state, onPatch }: AIAssistantProps) {
         {loading ? (
           <div className="flex items-center gap-2 text-xs text-slate-500">
             <Loader2 size={14} className="animate-spin" />
-            IA en train de réfléchir...
+            {loadingLabel}
           </div>
         ) : null}
       </div>
@@ -118,6 +172,27 @@ export function AIAssistant({ state, onPatch }: AIAssistantProps) {
         >
           Appliquer avec IA
         </Button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/pdf"
+          className="hidden"
+          onChange={handlePdfUpload}
+          disabled={loading || Boolean(queuedPrompt)}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full"
+          disabled={loading || Boolean(queuedPrompt)}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <FileUp size={14} className="mr-2" />
+          Importer une facture PDF
+        </Button>
+        <p className="text-[11px] text-slate-500">
+          Le PDF est analysé puis les champs détectés sont pré-remplis.
+        </p>
       </form>
     </div>
   );

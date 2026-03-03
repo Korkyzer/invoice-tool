@@ -19,8 +19,9 @@ interface AIAssistantProps {
 
 const QUICK_SUGGESTIONS = [
   "3 jours de conseil à 600€/jour TVA 20%",
+  "Ajoute une ligne 'Audit sécurité' : 1 jour à 750€ HT TVA 20%",
+  "Modifie la première ligne: quantité 4 au lieu de 3",
   "Trouve les infos de ChainZoku (SIREN, TVA, adresse, téléphone, site) et mets à jour le client",
-  "Ajoute une ligne Maintenance: 2h à 120€ HT TVA 20%",
   "Échéance à 30 jours et note: paiement par virement SEPA uniquement",
 ];
 
@@ -84,19 +85,20 @@ export function AIAssistant({ state, onPatch }: AIAssistantProps) {
     setInput("");
   };
 
-  const handlePdfUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleDocumentUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    if (file.type !== "application/pdf") {
-      toast.error("Merci d'uploader un fichier PDF");
+    const acceptedTypes = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
+    if (!acceptedTypes.includes(file.type)) {
+      toast.error("Merci d'uploader un PDF, PNG, JPG ou WEBP");
       event.target.value = "";
       return;
     }
 
     setLoading(true);
-    setLoadingLabel("Extraction du PDF en cours...");
-    setMessages((prev) => [...prev, { role: "user", text: `Import PDF: ${file.name}` }]);
+    setLoadingLabel("Analyse du document en cours...");
+    setMessages((prev) => [...prev, { role: "user", text: `Import document: ${file.name}` }]);
 
     try {
       const formData = new FormData();
@@ -122,12 +124,12 @@ export function AIAssistant({ state, onPatch }: AIAssistantProps) {
         if (result.error === "missing_api_key") {
           toast.error("MAMMOUTH_API_KEY manquante côté serveur");
         } else if (result.error === "file_too_large") {
-          toast.error("PDF trop volumineux (max 15 Mo)");
+          toast.error("Fichier trop volumineux (max 15 Mo)");
         } else {
           const debugSuffix = result.error
             ? ` (${result.error}${result.stage ? ` @ ${result.stage}` : ""})`
             : "";
-          toast.error(`Aucune donnée exploitable trouvée dans ce PDF${debugSuffix}`);
+          toast.error(`Aucune donnée exploitable trouvée dans ce document${debugSuffix}`);
         }
         setMessages((prev) => [
           ...prev,
@@ -135,7 +137,7 @@ export function AIAssistant({ state, onPatch }: AIAssistantProps) {
             role: "assistant",
             text: result.error
               ? `Je n'ai pas trouvé de données fiables (${result.error}${result.stage ? `, étape ${result.stage}` : ""}).`
-              : "Je n'ai pas trouvé de données fiables dans ce PDF.",
+              : "Je n'ai pas trouvé de données fiables dans ce document.",
           },
         ]);
       } else {
@@ -145,7 +147,7 @@ export function AIAssistant({ state, onPatch }: AIAssistantProps) {
         } else if (result.source === "heuristic") {
           toast.success("Import réussi (mode de secours)");
         } else {
-          toast.success("Informations importées depuis le PDF");
+          toast.success("Informations importées depuis le document");
         }
         setMessages((prev) => [
           ...prev,
@@ -153,8 +155,11 @@ export function AIAssistant({ state, onPatch }: AIAssistantProps) {
         ]);
       }
     } catch {
-      toast.error("Import PDF impossible");
-      setMessages((prev) => [...prev, { role: "assistant", text: "Import PDF impossible." }]);
+      toast.error("Import du document impossible");
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", text: "Import du document impossible." },
+      ]);
     } finally {
       setLoading(false);
       event.target.value = "";
@@ -212,9 +217,9 @@ export function AIAssistant({ state, onPatch }: AIAssistantProps) {
         <input
           ref={fileInputRef}
           type="file"
-          accept="application/pdf"
+          accept="application/pdf,image/jpeg,image/png,image/webp"
           className="hidden"
-          onChange={handlePdfUpload}
+          onChange={handleDocumentUpload}
           disabled={loading || Boolean(queuedPrompt)}
         />
         <Button
@@ -225,10 +230,10 @@ export function AIAssistant({ state, onPatch }: AIAssistantProps) {
           onClick={() => fileInputRef.current?.click()}
         >
           <FileUp size={14} className="mr-2" />
-          Importer une facture PDF
+          Importer une facture (PDF ou image)
         </Button>
         <p className="text-[11px] text-slate-500">
-          Le PDF est analysé puis les champs détectés sont pré-remplis.
+          Le document est analysé (OCR inclus) puis les champs détectés sont pré-remplis.
         </p>
       </form>
 

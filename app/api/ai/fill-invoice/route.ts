@@ -16,7 +16,11 @@ Si tu ne comprends pas, réponds avec: {}
 
 Champs de la facture que tu peux modifier:
 - client: { company_name, contact_name, email, phone, address, siret, tva_number, website }
-- lines: tableau de { description, quantity, unit_price, vat_rate } (vat_rate: 0, 5.5, 10 ou 20)
+- lines: tableau de { description, quantity, unit_price, vat_rate } pour REMPLACER toutes les lignes (vat_rate: 0, 5.5, 10 ou 20)
+- line_append: tableau de nouvelles lignes à AJOUTER sans supprimer les lignes existantes
+- line_updates: tableau de modifications ciblées avec { line_number, description?, quantity?, unit_price?, vat_rate? }
+  - line_number est en base 1 (1 = première ligne, 2 = deuxième, etc.)
+- line_delete_indices: tableau des numéros de ligne (base 1) à supprimer
 - issue_date: string ISO (ex: "2025-03-15")
 - due_date: string ISO
 - notes: string (texte libre en bas de facture)
@@ -28,6 +32,8 @@ Règles importantes:
 - Ne jamais inventer un numéro de TVA intracommunautaire.
 - Si l'utilisateur demande des infos d'entreprise (SIREN/SIRET, TVA, adresse, téléphone, email, site), retourne-les dans client.
 - Si l'information demandée n'est pas trouvée avec fiabilité, ne pas la renseigner.
+- Si l'utilisateur dit "ajoute une ligne", utilise line_append (pas lines).
+- Si l'utilisateur dit "modifie la première/deuxième/... ligne", utilise line_updates avec line_number.
 `;
 
 type SerperResult = {
@@ -160,6 +166,27 @@ function safeJsonParse(input: string) {
   }
 }
 
+function buildIndexedLinesContext(currentInvoiceState: Record<string, unknown>) {
+  const rawLines = currentInvoiceState.lines;
+  if (!Array.isArray(rawLines) || rawLines.length === 0) return "[]";
+
+  const indexed = rawLines.map((rawLine, index) => {
+    const line =
+      rawLine && typeof rawLine === "object" && !Array.isArray(rawLine)
+        ? (rawLine as Record<string, unknown>)
+        : {};
+    return {
+      line_number: index + 1,
+      description: String(line.description ?? "").trim(),
+      quantity: Number(line.quantity ?? 0),
+      unit_price: Number(line.unit_price ?? 0),
+      vat_rate: Number(line.vat_rate ?? 0),
+    };
+  });
+
+  return JSON.stringify(indexed, null, 2);
+}
+
 export async function POST(request: Request) {
   try {
     if (!process.env.MAMMOUTH_API_KEY) {
@@ -186,8 +213,13 @@ export async function POST(request: Request) {
 
     const webContext = shouldSearchWeb ? await fetchSerperContext(parsed.data.userInput) : "";
 
+    const indexedLinesContext = buildIndexedLinesContext(parsed.data.currentInvoiceState);
+
     const userMessageWithContext = `
 État actuel de la facture: ${JSON.stringify(parsed.data.currentInvoiceState, null, 2)}
+
+Lignes actuelles indexées (line_number en base 1):
+${indexedLinesContext}
 
 Message utilisateur: ${parsed.data.userInput}
 

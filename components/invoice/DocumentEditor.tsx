@@ -122,19 +122,97 @@ export function DocumentEditor({
         ? "Non payée"
         : "Lien non créé";
 
+  const toLine = (
+    line: Partial<DocumentLine>,
+    fallback: DocumentLine | undefined,
+    position: number,
+  ): DocumentLine => {
+    const quantity = Number(line.quantity ?? fallback?.quantity ?? 1);
+    const unitPrice = Number(line.unit_price ?? fallback?.unit_price ?? 0);
+    const vatRate = Number(line.vat_rate ?? fallback?.vat_rate ?? 20);
+
+    return {
+      description:
+        typeof line.description === "string"
+          ? line.description
+          : fallback?.description ?? "",
+      quantity: Number.isFinite(quantity) ? quantity : Number(fallback?.quantity ?? 1),
+      unit_price: Number.isFinite(unitPrice) ? unitPrice : Number(fallback?.unit_price ?? 0),
+      vat_rate: (Number.isFinite(vatRate) ? vatRate : Number(fallback?.vat_rate ?? 20)) as VatRate,
+      position,
+    };
+  };
+
+  const toInteger = (value: unknown): number | null => {
+    if (typeof value === "number" && Number.isFinite(value)) return Math.trunc(value);
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return Math.trunc(parsed);
+    }
+    return null;
+  };
+
   const applyPatch = (patch: InvoiceAssistantPatch) => {
     setState((prev) => {
       const next = { ...prev };
       if (patch.client) next.client = { ...prev.client, ...patch.client };
-      if (patch.lines && Array.isArray(patch.lines)) {
-        next.lines = patch.lines.map((line, index) => ({
-          description: line.description ?? prev.lines[index]?.description ?? "",
-          quantity: Number(line.quantity ?? prev.lines[index]?.quantity ?? 1),
-          unit_price: Number(line.unit_price ?? prev.lines[index]?.unit_price ?? 0),
-          vat_rate: Number(line.vat_rate ?? prev.lines[index]?.vat_rate ?? 20) as VatRate,
-          position: index,
-        }));
+
+      let patchedLines = prev.lines.map((line, index) => ({ ...line, position: index }));
+
+      if (patch.line_updates && Array.isArray(patch.line_updates)) {
+        for (const update of patch.line_updates) {
+          const fromLineNumber = toInteger(update.line_number);
+          const fromIndex = toInteger(update.index);
+          const targetIndex =
+            fromLineNumber !== null
+              ? fromLineNumber - 1
+              : fromIndex !== null
+                ? fromIndex > 0
+                  ? fromIndex - 1
+                  : fromIndex
+                : -1;
+
+          if (targetIndex < 0 || targetIndex >= patchedLines.length) continue;
+          patchedLines[targetIndex] = toLine(update, patchedLines[targetIndex], targetIndex);
+        }
       }
+
+      if (patch.line_append && Array.isArray(patch.line_append)) {
+        for (const appended of patch.line_append) {
+          patchedLines.push(toLine(appended, undefined, patchedLines.length));
+        }
+      }
+
+      if (patch.line_delete_indices && Array.isArray(patch.line_delete_indices)) {
+        const indexesToDelete = new Set<number>();
+        for (const rawIndex of patch.line_delete_indices) {
+          const normalized = toInteger(rawIndex);
+          if (normalized === null) continue;
+          const zeroBased = normalized > 0 ? normalized - 1 : normalized;
+          if (zeroBased >= 0 && zeroBased < patchedLines.length) {
+            indexesToDelete.add(zeroBased);
+          }
+        }
+        patchedLines = patchedLines.filter((_, index) => !indexesToDelete.has(index));
+      }
+
+      if (patch.lines && Array.isArray(patch.lines)) {
+        patchedLines = patch.lines.map((line, index) => toLine(line, prev.lines[index], index));
+      }
+
+      if (patchedLines.length === 0) {
+        patchedLines = [
+          {
+            description: "",
+            quantity: 1,
+            unit_price: 0,
+            vat_rate: 20,
+            position: 0,
+          },
+        ];
+      }
+
+      next.lines = patchedLines.map((line, index) => ({ ...line, position: index }));
       if (patch.issue_date) next.issue_date = patch.issue_date;
       if (patch.due_date) next.due_date = patch.due_date;
       if (typeof patch.notes === "string") next.notes = patch.notes;

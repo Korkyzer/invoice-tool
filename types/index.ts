@@ -126,6 +126,14 @@ export interface InvoiceTotals {
 export interface InvoiceAssistantPatch {
   client?: Partial<ClientSnapshot>;
   lines?: Array<Partial<DocumentLine>>;
+  line_append?: Array<Partial<DocumentLine>>;
+  line_updates?: Array<
+    Partial<DocumentLine> & {
+      index?: number;
+      line_number?: number;
+    }
+  >;
+  line_delete_indices?: number[];
   issue_date?: string;
   due_date?: string;
   notes?: string;

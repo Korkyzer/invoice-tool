@@ -9,7 +9,7 @@ const PATCH_SYSTEM = `
 Tu es un assistant qui extrait des informations de factures/devis français.
 Tu reçois:
 1) l'état actuel de la facture cible (JSON),
-2) le texte extrait d'un PDF d'une ancienne facture.
+2) le texte extrait d'un document source (PDF ou image), quand disponible.
 
 Tu dois répondre UNIQUEMENT avec un objet JSON valide contenant les champs à mettre à jour.
 Ne réponds jamais avec des explications.
@@ -545,6 +545,64 @@ async function extractPatchWithModel({
   }
 }
 
+async function extractPatchFromVision({
+  client,
+  model,
+  mimeType,
+  base64,
+  currentInvoiceState,
+}: {
+  client: OpenAI;
+  model: string;
+  mimeType: string;
+  base64: string;
+  currentInvoiceState: JsonObject;
+}) {
+  const messageContent = [
+    {
+      type: "text" as const,
+      text: `État actuel de la facture cible: ${JSON.stringify(currentInvoiceState, null, 2)}`,
+    },
+    {
+      type: "text" as const,
+      text: "Analyse ce document (OCR) puis retourne uniquement un JSON patch valide.",
+    },
+    {
+      type: "image_url" as const,
+      image_url: { url: `data:${mimeType};base64,${base64}` },
+    },
+  ];
+
+  try {
+    const response = await client.chat.completions.create({
+      model,
+      messages: [
+        { role: "system", content: PATCH_SYSTEM },
+        { role: "user", content: messageContent },
+      ],
+      max_tokens: 900,
+      temperature: 0.1,
+      response_format: { type: "json_object" } as never,
+    });
+
+    const content = response.choices[0]?.message?.content ?? "{}";
+    return sanitizePatch(safeJsonParse(content));
+  } catch {
+    const fallback = await client.chat.completions.create({
+      model,
+      messages: [
+        { role: "system", content: PATCH_SYSTEM },
+        { role: "user", content: messageContent },
+      ],
+      max_tokens: 900,
+      temperature: 0.1,
+    });
+
+    const content = fallback.choices[0]?.message?.content ?? "{}";
+    return sanitizePatch(safeJsonParse(content));
+  }
+}
+
 export async function POST(request: Request) {
   let stage = "start";
   try {
@@ -560,7 +618,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ patch: {}, error: "missing_file" }, { status: 400 });
     }
 
-    if (file.type !== "application/pdf") {
+    const mimeType = file.type || "application/octet-stream";
+    const isPdf = mimeType === "application/pdf";
+    const isImage =
+      mimeType === "image/jpeg" || mimeType === "image/png" || mimeType === "image/webp";
+
+    if (!isPdf && !isImage) {
       return NextResponse.json({ patch: {}, error: "invalid_file_type" }, { status: 400 });
     }
 
@@ -573,13 +636,6 @@ export async function POST(request: Request) {
 
     stage = "pdf-read";
     const bytes = Buffer.from(await file.arrayBuffer());
-    stage = "pdf-text";
-    const nativeText = (await extractNativePdfText(bytes))
-      .replace(/\r/g, "")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim()
-      .slice(0, 30000);
-
     const client = hasApiKey
       ? new OpenAI({
           apiKey: process.env.MAMMOUTH_API_KEY,
@@ -587,13 +643,62 @@ export async function POST(request: Request) {
         })
       : null;
 
-    const ocrText = "";
-    const shouldRunOcr = false;
+    if (isImage) {
+      if (!client) {
+        return NextResponse.json({ patch: {}, error: "missing_api_key" }, { status: 200 });
+      }
 
-    const combinedText = [nativeText, ocrText]
-      .filter((chunk) => chunk && chunk.trim().length > 0)
-      .join("\n\n----- OCR -----\n\n")
-      .trim();
+      const base64 = bytes.toString("base64");
+      const primaryVisionModel = process.env.MAMMOUTH_PDF_OCR_MODEL || "gemini-2.5-flash-lite";
+      const fallbackVisionModel =
+        process.env.MAMMOUTH_PDF_OCR_FALLBACK_MODEL || "claude-haiku-4-5";
+
+      stage = "image-ocr-primary";
+      let patch = await extractPatchFromVision({
+        client,
+        model: primaryVisionModel,
+        mimeType,
+        base64,
+        currentInvoiceState,
+      }).catch(() => ({}));
+      let patchModel = primaryVisionModel;
+
+      if (!hasMeaningfulPatch(patch)) {
+        stage = "image-ocr-fallback";
+        patch = await extractPatchFromVision({
+          client,
+          model: fallbackVisionModel,
+          mimeType,
+          base64,
+          currentInvoiceState,
+        }).catch(() => ({}));
+        patchModel = fallbackVisionModel;
+      }
+
+      if (!hasMeaningfulPatch(patch)) {
+        return NextResponse.json({ patch: {}, error: "empty_document_text" }, { status: 200 });
+      }
+
+      return NextResponse.json({
+        patch,
+        source: "model" as const,
+        stage: "done",
+        extractedChars: 0,
+        nativeChars: 0,
+        ocrChars: 0,
+        usedOcr: true,
+        patchModel,
+      });
+    }
+
+    stage = "pdf-text";
+    const nativeText = (await extractNativePdfText(bytes))
+      .replace(/\r/g, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+      .slice(0, 30000);
+
+    const combinedText = nativeText.trim();
 
     if (!combinedText || combinedText.length < 40) {
       return NextResponse.json({ patch: {}, error: "empty_pdf_text" }, { status: 200 });
@@ -632,8 +737,8 @@ ${combinedText.slice(0, 45000)}
       stage: "done",
       extractedChars: combinedText.length,
       nativeChars: nativeText.length,
-      ocrChars: ocrText.length,
-      usedOcr: shouldRunOcr && ocrText.length > 0,
+      ocrChars: 0,
+      usedOcr: false,
       patchModel,
     });
   } catch (error) {
